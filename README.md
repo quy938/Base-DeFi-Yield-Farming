@@ -26,7 +26,7 @@ base-defi-yield-farming/
 
 🚀 Installation and Setup
 1. Clone the repository
-git clone https://github.com/yourusername/base-defi-yield-farming.git
+git clone https://github.com/quy938/base-defi-yield-farming.git
 cd base-defi-yield-farming
 2. Install dependencies
 npm install
