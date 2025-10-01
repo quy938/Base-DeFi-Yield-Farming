@@ -1,4 +1,4 @@
-// base-defi-yield-farming/test/yield-farm.test.js
+
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
