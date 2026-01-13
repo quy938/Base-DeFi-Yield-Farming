@@ -52,7 +52,7 @@ contract YieldFarmV2 is Ownable, ReentrancyGuard {
     uint256 public constant MAX_ALLOC_POINTS = 100000;
     uint256 public constant MAX_REWARD_RATE = 1000000000000000000000; // 1000 tokens per second
     
-    // Configuration
+
     uint256 public minimumStakeAmount;
     uint256 public maximumStakeAmount;
     uint256 public performanceFee;
