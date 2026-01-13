@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+contract YieldFarmV2 is Ownable, ReentrancyGuard {
+    using SafeMath for uint256;
+
+    struct Pool {
+        IERC20 token;
+        uint256 totalStaked;
+        uint256 rewardPerSecond;
+        uint256 lastUpdateTime;
+        uint256 rewardRate;
+        uint256 periodFinish;
+        uint256 allocPoint;
+        uint256 lastRewardTime;
+        bool enabled;
+        uint256 apr;
+    }
+
+    struct UserInfo {
+        uint256 amount;
+        uint256 rewardDebt;
+        uint256 lastRewardTime;
+        uint256 pendingRewards;
+        uint256 totalRewardsReceived;
+        uint256 firstStakeTime;
+    }
+
+    struct PoolInfo {
+        address token;
+        uint256 allocPoint;
+        uint256 rewardRate;
+        uint256 apr;
+        uint256 totalStaked;
+        bool enabled;
+    }
+
+    mapping(address => Pool) public pools;
+    mapping(address => mapping(address => UserInfo)) public userInfo;
+    mapping(address => uint256[]) public userPools;
+    
+    IERC20 public rewardToken;
+    IERC20 public stakingToken;
+    
+    uint256 public totalAllocPoints;
+    uint256 public rewardPerSecond;
+    uint256 public constant MAX_ALLOC_POINTS = 100000;
+    uint256 public constant MAX_REWARD_RATE = 1000000000000000000000; // 1000 tokens per second
+    
+    // Configuration
+    uint256 public minimumStakeAmount;
+    uint256 public maximumStakeAmount;
+    uint256 public performanceFee;
+    uint256 public withdrawalFee;
+    uint256 public lockupPeriod;
+    
+    // Events
+    event PoolCreated(address indexed token, uint256 allocPoint, uint256 rewardRate, uint256 apr);
+    event Staked(address indexed user, address indexed token, uint256 amount);
+    event Withdrawn(address indexed user, address indexed token, uint256 amount);
+    event RewardPaid(address indexed user, address indexed token, uint256 reward);
+    event EmergencyWithdraw(address indexed user, address indexed token, uint256 amount);
+    event PoolUpdated(address indexed token, uint256 allocPoint, uint256 rewardRate);
+    event RewardRateUpdated(uint256 newRate);
+    event FeeUpdated(uint256 performanceFee, uint256 withdrawalFee);
+    event LockupPeriodUpdated(uint256 newPeriod);
+    event PoolDisabled(address indexed token);
+    event PoolEnabled(address indexed token);
+    event WithdrawalLocked(address indexed user, address indexed token, uint256 unlockTime);
+
+    constructor(
+        address _rewardToken,
+        address _stakingToken,
+        uint256 _rewardPerSecond,
+        uint256 _minimumStakeAmount,
+        uint256 _maximumStakeAmount
+    ) {
+        rewardToken = IERC20(_rewardToken);
+        stakingToken = IERC20(_stakingToken);
+        rewardPerSecond = _rewardPerSecond;
+        minimumStakeAmount = _minimumStakeAmount;
+        maximumStakeAmount = _maximumStakeAmount;
+        performanceFee = 50; // 0.5%
+        withdrawalFee = 10; // 0.1%
+        lockupPeriod = 30 days; // 30 days lockup
+    }
+
+    // Create new pool
+    function createPool(
+        address token,
+        uint256 allocPoint,
+        uint256 rewardRate,
+        uint256 apr
+    ) external onlyOwner {
+        require(token != address(0), "Invalid token");
+        require(allocPoint <= MAX_ALLOC_POINTS, "Too many alloc points");
+        require(rewardRate <= MAX_REWARD_RATE, "Reward rate too high");
+        require(apr <= 1000000, "APR too high"); // 10000% max APR
+        
+        Pool storage pool = pools[token];
+        require(pool.token == address(0), "Pool already exists");
+        
+        pool.token = IERC20(token);
+        pool.allocPoint = allocPoint;
+        pool.rewardRate = rewardRate;
+        pool.lastRewardTime = block.timestamp;
+        pool.apr = apr;
+        pool.enabled = true;
+        
+        totalAllocPoints = totalAllocPoints.add(allocPoint);
+        
+        emit PoolCreated(token, allocPoint, rewardRate, apr);
+    }
+
+    // Update pool parameters
+    function updatePool(
+        address token,
+        uint256 allocPoint,
+        uint256 rewardRate,
+        uint256 apr
+    ) external onlyOwner {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        require(allocPoint <= MAX_ALLOC_POINTS, "Too many alloc points");
+        require(rewardRate <= MAX_REWARD_RATE, "Reward rate too high");
+        require(apr <= 1000000, "APR too high");
+        
+        totalAllocPoints = totalAllocPoints.sub(pool.allocPoint).add(allocPoint);
+        
+        pool.allocPoint = allocPoint;
+        pool.rewardRate = rewardRate;
+        pool.apr = apr;
+        
+        emit PoolUpdated(token, allocPoint, rewardRate);
+    }
+
+    // Enable pool
+    function enablePool(address token) external onlyOwner {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        pool.enabled = true;
+        emit PoolEnabled(token);
+    }
+
+    // Disable pool
+    function disablePool(address token) external onlyOwner {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        pool.enabled = false;
+        emit PoolDisabled(token);
+    }
+
+    // Stake tokens
+    function stake(
+        address token,
+        uint256 amount
+    ) external whenNotPaused nonReentrant {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        require(pool.enabled, "Pool disabled");
+        require(amount >= minimumStakeAmount, "Amount below minimum");
+        require(amount <= maximumStakeAmount, "Amount above maximum");
+        require(amount > 0, "Amount must be greater than 0");
+        require(pool.token.balanceOf(msg.sender) >= amount, "Insufficient balance");
+        
+        updatePool(token);
+        UserInfo storage user = userInfo[token][msg.sender];
+        
+        if (user.amount > 0) {
+            uint256 pending = calculatePendingReward(token, msg.sender);
+            if (pending > 0) {
+                user.pendingRewards = user.pendingRewards.add(pending);
+            }
+        }
+        
+        user.amount = user.amount.add(amount);
+        pool.totalStaked = pool.totalStaked.add(amount);
+        
+        if (user.firstStakeTime == 0) {
+            user.firstStakeTime = block.timestamp;
+        }
+        
+        pool.token.transferFrom(msg.sender, address(this), amount);
+        user.lastRewardTime = block.timestamp;
+        
+        // Update user history
+        userPools[msg.sender].push(token);
+        
+        emit Staked(msg.sender, token, amount);
+    }
+
+    // Withdraw tokens
+    function withdraw(
+        address token,
+        uint256 amount
+    ) external whenNotPaused nonReentrant {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        require(pool.enabled, "Pool disabled");
+        require(userInfo[token][msg.sender].amount >= amount, "Insufficient balance");
+        
+        updatePool(token);
+        UserInfo storage user = userInfo[token][msg.sender];
+        
+        uint256 pending = calculatePendingReward(token, msg.sender);
+        if (pending > 0) {
+            user.pendingRewards = user.pendingRewards.add(pending);
+        }
+        
+        // Check lockup period
+        if (block.timestamp < user.firstStakeTime.add(lockupPeriod)) {
+            uint256 feeAmount = amount.mul(withdrawalFee).div(10000);
+            uint256 amountAfterFee = amount.sub(feeAmount);
+            
+            // Apply fee
+            if (feeAmount > 0) {
+                pool.token.transfer(owner(), feeAmount);
+            }
+            
+            user.amount = user.amount.sub(amountAfterFee);
+            pool.totalStaked = pool.totalStaked.sub(amountAfterFee);
+            pool.token.transfer(msg.sender, amountAfterFee);
+        } else {
+            user.amount = user.amount.sub(amount);
+            pool.totalStaked = pool.totalStaked.sub(amount);
+            pool.token.transfer(msg.sender, amount);
+        }
+        
+        user.lastRewardTime = block.timestamp;
+        
+        emit Withdrawn(msg.sender, token, amount);
+    }
+
+    // Claim rewards
+    function getReward(
+        address token
+    ) external whenNotPaused nonReentrant {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        require(pool.enabled, "Pool disabled");
+        
+        updatePool(token);
+        UserInfo storage user = userInfo[token][msg.sender];
+        
+        uint256 pending = calculatePendingReward(token, msg.sender);
+        require(pending > 0, "No rewards to claim");
+        
+        user.pendingRewards = user.pendingRewards.add(pending);
+        user.rewardDebt = user.rewardDebt.add(pending);
+        user.totalRewardsReceived = user.totalRewardsReceived.add(pending);
+        
+        // Apply performance fee
+        uint256 performanceFeeAmount = pending.mul(performanceFee).div(10000);
+        uint256 amountAfterFee = pending.sub(performanceFeeAmount);
+        
+        if (performanceFeeAmount > 0) {
+            rewardToken.transfer(owner(), performanceFeeAmount);
+        }
+        
+        // Transfer rewards
+        rewardToken.transfer(msg.sender, amountAfterFee);
+        
+        emit RewardPaid(msg.sender, token, amountAfterFee);
+    }
+
+    // Emergency withdraw (only owner)
+    function emergencyWithdraw(
+        address token
+    ) external onlyOwner {
+        Pool storage pool = pools[token];
+        require(pool.token != address(0), "Pool does not exist");
+        
+        UserInfo storage user = userInfo[token][msg.sender];
+        uint256 amount = user.amount;
+        
+        if (amount > 0) {
+            user.amount = 0;
+            pool.totalStaked = pool.totalStaked.sub(amount);
+            pool.token.transfer(msg.sender, amount);
+            emit EmergencyWithdraw(msg.sender, token, amount);
+        }
+    }
+
+    // Update pools
+    function updatePool(address token) internal {
+        Pool storage pool = pools[token];
+        if (block.timestamp <= pool.lastUpdateTime) return;
+        
+        uint256 timePassed = block.timestamp.sub(pool.lastUpdateTime);
+        uint256 newRewards = timePassed.mul(pool.rewardRate);
+        
+        if (pool.totalStaked > 0) {
+            pool.rewardPerTokenStored = pool.rewardPerTokenStored.add(
+                newRewards.mul(1e18).div(pool.totalStaked)
+            );
+        }
+        
+        pool.lastUpdateTime = block.timestamp;
+    }
+
+    // Calculate pending reward
+    function calculatePendingReward(
+        address token,
+        address user
+    ) public view returns (uint256) {
+        Pool storage pool = pools[token];
+        UserInfo storage userInfo = userInfo[token][user];
+        
+        uint256 rewardPerToken = pool.rewardPerTokenStored;
+        uint256 userReward = userInfo.rewardDebt;
+        
+        if (userInfo.amount > 0) {
+            uint256 userEarned = userInfo.amount.mul(rewardPerToken.sub(userReward)).div(1e18);
+            return userEarned;
+        }
+        return 0;
+    }
+
+    // Get pool info
+    function getPoolInfo(address token) external view returns (PoolInfo memory) {
+        Pool storage pool = pools[token];
+        return PoolInfo({
+            token: address(pool.token),
+            allocPoint: pool.allocPoint,
+            rewardRate: pool.rewardRate,
+            apr: pool.apr,
+            totalStaked: pool.totalStaked,
+            enabled: pool.enabled
+        });
+    }
+
+    // Get user info
+    function getUserInfo(address token, address user) external view returns (UserInfo memory) {
+        return userInfo[token][user];
+    }
+
+    // Get user pools
+    function getUserPools(address user) external view returns (address[] memory) {
+        return userPools[user];
+    }
+
+    // Set reward rate
+    function setRewardRate(uint256 newRate) external onlyOwner {
+        require(newRate <= MAX_REWARD_RATE, "Reward rate too high");
+        rewardPerSecond = newRate;
+        emit RewardRateUpdated(newRate);
+    }
+
+    // Set fees
+    function setFees(uint256 newPerformanceFee, uint256 newWithdrawalFee) external onlyOwner {
+        require(newPerformanceFee <= 1000, "Performance fee too high"); // 10%
+        require(newWithdrawalFee <= 1000, "Withdrawal fee too high"); // 10%
+        performanceFee = newPerformanceFee;
+        withdrawalFee = newWithdrawalFee;
+        emit FeeUpdated(newPerformanceFee, newWithdrawalFee);
+    }
+
+    // Set lockup period
+    function setLockupPeriod(uint256 newPeriod) external onlyOwner {
+        lockupPeriod = newPeriod;
+        emit LockupPeriodUpdated(newPeriod);
+    }
+
+    // Set stake limits
+    function setStakeLimits(uint256 newMin, uint256 newMax) external onlyOwner {
+        minimumStakeAmount = newMin;
+        maximumStakeAmount = newMax;
+    }
+
+    // Get farm stats
+    function getFarmStats() external view returns (
+        uint256 totalStaked,
+        uint256 totalRewards,
+        uint256 totalUsers,
+        uint256 totalPools
+    ) {
+        totalStaked = 0;
+        totalRewards = 0;
+        totalUsers = 0;
+        totalPools = 0;
+        
+        for (uint256 i = 0; i < type(uint256).max; i++) {
+            if (pools[address(i)].token != address(0)) {
+                totalPools++;
+                totalStaked = totalStaked.add(pools[address(i)].totalStaked);
+            }
+        }
+        
+        return (totalStaked, totalRewards, totalUsers, totalPools);
+    }
+
+    // Check if user can claim reward
+    function canClaimReward(address token, address user) external view returns (bool) {
+        Pool storage pool = pools[token];
+        UserInfo storage userInfo = userInfo[token][user];
+        if (pool.token == address(0) || !pool.enabled) return false;
+        return userInfo.amount > 0;
+    }
+
+    // Pause contract
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    // Unpause contract
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+}
