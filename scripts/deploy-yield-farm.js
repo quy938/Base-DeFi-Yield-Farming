@@ -17,7 +17,7 @@ async function main() {
   const stakingToken = await StakingToken.deploy();
   await stakingToken.deployed();
 
-  // Деплой Yield Farm контракта
+
   const YieldFarm = await ethers.getContractFactory("YieldFarmV2");
   const yieldFarm = await YieldFarm.deploy(
     rewardToken.address,
