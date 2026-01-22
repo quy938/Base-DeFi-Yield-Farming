@@ -15,7 +15,7 @@ async function main() {
   const newYieldFarm = await YieldFarmV4.deploy(
     "0x...", // rewardToken address
     "0x...", // stakingToken address,
-    ethers.utils.parseEther("150") // 150 tokens per second
+    ethers.utils.parseEther("150") 
   );
 
   await newYieldFarm.deployed();
