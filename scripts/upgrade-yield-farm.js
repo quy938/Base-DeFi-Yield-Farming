@@ -7,10 +7,10 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Upgrading with the account:", deployer.address);
 
-  // Получаем адрес текущего контракта
+
   const currentContractAddress = "0x...";
   
-  // Деплой нового контракта
+
   const YieldFarmV4 = await ethers.getContractFactory("YieldFarmV4");
   const newYieldFarm = await YieldFarmV4.deploy(
     "0x...", // rewardToken address
@@ -22,13 +22,13 @@ async function main() {
 
   console.log("New Base DeFi Yield Farming deployed to:", newYieldFarm.address);
   
-  // Перенос данных с старого контракта
+
   const oldContract = await ethers.getContractAt("YieldFarmV3", currentContractAddress);
   
-  // Увеличение комиссии
+
   console.log("Upgrading fee structure...");
   
-  // Сохраняем информацию о обновлении
+
   const fs = require("fs");
   const upgradeData = {
     oldContract: currentContractAddress,
