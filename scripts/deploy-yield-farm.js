@@ -22,7 +22,7 @@ async function main() {
   const yieldFarm = await YieldFarm.deploy(
     rewardToken.address,
     stakingToken.address,
-    ethers.utils.parseEther("100") // 100 tokens per second
+    ethers.utils.parseEther("100") 
   );
 
   await yieldFarm.deployed();
