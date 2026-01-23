@@ -1,4 +1,4 @@
-// base-defi-yield-farming/scripts/deploy-yield-farm.js
+
 const { ethers } = require("hardhat");
 
 async function main() {
