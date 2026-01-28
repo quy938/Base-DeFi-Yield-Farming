@@ -411,4 +411,34 @@ contract YieldFarmV2 is Ownable, ReentrancyGuard {
     function unpause() external onlyOwner {
         _unpause();
     }
+    // Добавить функции:
+function calculateDynamicRewardRate(
+    address token,
+    uint256 liquidity,
+    uint256 marketCap,
+    uint256 tradingVolume
+) external view returns (uint256) {
+    // Алгоритм динамического расчета наград
+    // Учитывает ликвидность, рыночную капитализацию и объем торгов
+    uint256 baseRate = 1000; // 10%
+    uint256 liquidityFactor = liquidity / 1000000000000000000; // 1 ETH
+    uint256 volumeFactor = tradingVolume / 1000000000000000000; // 1 ETH
+    uint256 marketCapFactor = marketCap / 1000000000000000000000; // 1000 ETH
+    
+    uint256 dynamicRate = baseRate + 
+                         (liquidityFactor * 2) + 
+                         (volumeFactor / 100) + 
+                         (marketCapFactor / 1000);
+    
+    return dynamicRate > 10000 ? 10000 : dynamicRate; // Максимум 100%
+}
+
+function getMarketData(address token) external view returns (
+    uint256 liquidity,
+    uint256 marketCap,
+    uint256 tradingVolume
+) {
+    
+    return (0, 0, 0); // Реализация в будущем
+}
 }
