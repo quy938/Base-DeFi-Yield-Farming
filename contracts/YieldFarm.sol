@@ -95,5 +95,5 @@ contract YieldFarm is Ownable {
             return userEarned + userReward;
         }
         return userReward;
-    }
+     }
 }
