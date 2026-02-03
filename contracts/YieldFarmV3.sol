@@ -441,4 +441,160 @@ function getMarketData(address token) external view returns (
     
     return (0, 0, 0); // Реализация в будущем
 }
+// Добавить структуры:
+struct VirtualStake {
+    uint256 amount;
+    uint256 virtualAmount;
+    uint256 lastUpdateTime;
+    uint256 rewardDebt;
+    uint256 pendingRewards;
+    uint256 totalRewardsReceived;
+    uint256 firstStakeTime;
+}
+
+struct AutoReinvestConfig {
+    bool enabled;
+    uint256 frequency; // seconds
+    uint256 minAmount;
+    uint256 maxAmount;
+    uint256 minAPR;
+    bool compoundRewards;
+}
+
+// Добавить маппинги:
+mapping(address => mapping(address => VirtualStake)) public virtualStakes;
+mapping(address => AutoReinvestConfig) public autoReinvestConfigs;
+
+// Добавить события:
+event VirtualStakeCreated(
+    address indexed user,
+    address indexed token,
+    uint256 amount,
+    uint256 virtualAmount
+);
+
+event VirtualStakeUpdated(
+    address indexed user,
+    address indexed token,
+    uint256 amount,
+    uint256 virtualAmount
+);
+
+event AutoReinvestEnabled(
+    address indexed user,
+    address indexed token,
+    bool enabled,
+    uint256 frequency
+);
+
+// Добавить функции:
+function createVirtualStake(
+    address token,
+    uint256 amount,
+    uint256 virtualMultiplier
+) external {
+    require(amount > 0, "Amount must be greater than 0");
+    require(token != address(0), "Invalid token");
+    
+    // Calculate virtual amount
+    uint256 virtualAmount = amount * virtualMultiplier / 10000;
+    
+    VirtualStake storage stake = virtualStakes[token][msg.sender];
+    
+    stake.amount = stake.amount + amount;
+    stake.virtualAmount = stake.virtualAmount + virtualAmount;
+    stake.lastUpdateTime = block.timestamp;
+    
+    if (stake.firstStakeTime == 0) {
+        stake.firstStakeTime = block.timestamp;
+    }
+    
+    emit VirtualStakeCreated(msg.sender, token, amount, virtualAmount);
+}
+
+function updateVirtualStake(
+    address token,
+    uint256 amount,
+    uint256 virtualMultiplier
+) external {
+    require(amount > 0, "Amount must be greater than 0");
+    
+    uint256 virtualAmount = amount * virtualMultiplier / 10000;
+    
+    VirtualStake storage stake = virtualStakes[token][msg.sender];
+    
+    stake.amount = stake.amount + amount;
+    stake.virtualAmount = stake.virtualAmount + virtualAmount;
+    stake.lastUpdateTime = block.timestamp;
+    
+    emit VirtualStakeUpdated(msg.sender, token, amount, virtualAmount);
+}
+
+function enableAutoReinvest(
+    address token,
+    uint256 frequency,
+    uint256 minAmount,
+    uint256 maxAmount,
+    uint256 minAPR,
+    bool compoundRewards
+) external {
+    require(frequency >= 3600, "Frequency too short (minimum 1 hour)");
+    
+    autoReinvestConfigs[token] = AutoReinvestConfig({
+        enabled: true,
+        frequency: frequency,
+        minAmount: minAmount,
+        maxAmount: maxAmount,
+        minAPR: minAPR,
+        compoundRewards: compoundRewards
+    });
+    
+    emit AutoReinvestEnabled(msg.sender, token, true, frequency);
+}
+
+function autoReinvestRewards(
+    address token
+) external {
+    AutoReinvestConfig storage config = autoReinvestConfigs[token];
+    require(config.enabled, "Auto reinvest not enabled");
+    
+    VirtualStake storage stake = virtualStakes[token][msg.sender];
+    require(stake.amount > 0, "No stake to reinvest");
+    
+    // Check if enough time has passed
+    require(block.timestamp >= stake.lastUpdateTime + config.frequency, "Too early for reinvestment");
+    
+    // Calculate pending rewards
+    uint256 pendingRewards = calculatePendingReward(msg.sender, token);
+    
+    // Check minimum amount
+    if (pendingRewards >= config.minAmount && pendingRewards <= config.maxAmount) {
+        // Reinvest rewards
+        uint256 reinvestAmount = pendingRewards;
+        
+        if (config.compoundRewards) {
+            // Compound rewards by adding to stake
+            uint256 virtualMultiplier = 10000; // 100% virtual multiplier
+            uint256 virtualAmount = reinvestAmount * virtualMultiplier / 10000;
+            
+            stake.amount = stake.amount + reinvestAmount;
+            stake.virtualAmount = stake.virtualAmount + virtualAmount;
+            stake.lastUpdateTime = block.timestamp;
+        }
+        
+        // Reset pending rewards
+        stake.pendingRewards = 0;
+        stake.totalRewardsReceived = stake.totalRewardsReceived + pendingRewards;
+        
+        emit AutoReinvestExecuted(msg.sender, token, reinvestAmount, pendingRewards, block.timestamp);
+    }
+}
+
+function getVirtualStakeInfo(address token, address user) external view returns (VirtualStake memory) {
+    return virtualStakes[token][user];
+}
+
+function getAutoReinvestConfig(address token) external view returns (AutoReinvestConfig memory) {
+    return autoReinvestConfigs[token];
+}
 }
