@@ -739,10 +739,10 @@ contract YieldFarm is Ownable, ReentrancyGuard {
             return 1000; // 10% по умолчанию
         }
         
-        // Базовая формула динамического расчета наград
+       
         uint256 baseReward = config.baseRewardRate;
         
-        // Множитель ликвидности
+       
         uint256 liquidityFactor = poolLiquidity > 0 ? 
             (poolLiquidity * config.liquidityMultiplier) / 10000 : 0;
             
