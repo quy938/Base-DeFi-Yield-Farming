@@ -818,7 +818,7 @@ contract YieldFarm is Ownable, ReentrancyGuard {
         uint256 avgPriceChange,
         uint256 totalNetworkActivity
     ) {
-        // Возвращает общую статистику рынка
+        
         return (0, 0, 0, 0, 0);
     }
 }
