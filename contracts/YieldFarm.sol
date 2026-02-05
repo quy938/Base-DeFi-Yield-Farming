@@ -750,7 +750,7 @@ contract YieldFarm is Ownable, ReentrancyGuard {
         uint256 volumeFactor = poolVolume > 0 ? 
             (poolVolume * config.volumeMultiplier) / 1000000 : 0;
             
-        // Множитель рыночной капитализации
+       
         uint256 marketCapFactor = market.marketCap > 0 ? 
             (market.marketCap * config.marketCapMultiplier) / 1000000000 : 0;
             
