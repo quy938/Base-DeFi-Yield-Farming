@@ -597,4 +597,229 @@ function getVirtualStakeInfo(address token, address user) external view returns 
 function getAutoReinvestConfig(address token) external view returns (AutoReinvestConfig memory) {
     return autoReinvestConfigs[token];
 }
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+contract YieldFarm is Ownable, ReentrancyGuard {
+    using SafeMath for uint256;
+
+    // Существующие структуры и функции...
+    
+    // Новые структуры для динамических наград
+    struct MarketData {
+        uint256 totalLiquidity;
+        uint256 marketCap;
+        uint256 tradingVolume;
+        uint256 priceChange24h;
+        uint256 networkActivity;
+        uint256 timestamp;
+    }
+    
+    struct DynamicRewardConfig {
+        uint256 baseRewardRate;
+        uint256 liquidityMultiplier;
+        uint256 volumeMultiplier;
+        uint256 marketCapMultiplier;
+        uint256 priceImpactMultiplier;
+        uint256 networkActivityMultiplier;
+        uint256 maxRewardRate;
+        uint256 minRewardRate;
+    }
+    
+    struct PoolDynamicInfo {
+        uint256 poolLiquidity;
+        uint256 poolVolume;
+        uint256 poolAPR;
+        uint256 lastUpdateTime;
+        uint256 rewardAdjustment;
+    }
+    
+    // Новые маппинги
+    mapping(address => MarketData) public marketData;
+    mapping(address => DynamicRewardConfig) public poolRewardConfigs;
+    mapping(address => PoolDynamicInfo) public poolDynamicInfo;
+    
+    // Новые события
+    event MarketDataUpdated(
+        address indexed token,
+        uint256 totalLiquidity,
+        uint256 marketCap,
+        uint256 tradingVolume,
+        uint256 timestamp
+    );
+    
+    event DynamicRewardConfigUpdated(
+        address indexed token,
+        uint256 baseRewardRate,
+        uint256 liquidityMultiplier,
+        uint256 volumeMultiplier
+    );
+    
+    event PoolRewardAdjusted(
+        address indexed token,
+        uint256 newRewardRate,
+        uint256 adjustmentReason
+    );
+    
+    // Новые функции для динамических наград
+    function setDynamicRewardConfig(
+        address token,
+        uint256 baseRewardRate,
+        uint256 liquidityMultiplier,
+        uint256 volumeMultiplier,
+        uint256 marketCapMultiplier,
+        uint256 priceImpactMultiplier,
+        uint256 networkActivityMultiplier,
+        uint256 maxRewardRate,
+        uint256 minRewardRate
+    ) external onlyOwner {
+        require(baseRewardRate <= 1000000, "Base reward rate too high");
+        require(maxRewardRate >= minRewardRate, "Invalid reward rate limits");
+        
+        poolRewardConfigs[token] = DynamicRewardConfig({
+            baseRewardRate: baseRewardRate,
+            liquidityMultiplier: liquidityMultiplier,
+            volumeMultiplier: volumeMultiplier,
+            marketCapMultiplier: marketCapMultiplier,
+            priceImpactMultiplier: priceImpactMultiplier,
+            networkActivityMultiplier: networkActivityMultiplier,
+            maxRewardRate: maxRewardRate,
+            minRewardRate: minRewardRate
+        });
+        
+        emit DynamicRewardConfigUpdated(
+            token,
+            baseRewardRate,
+            liquidityMultiplier,
+            volumeMultiplier
+        );
+    }
+    
+    function updateMarketData(
+        address token,
+        uint256 totalLiquidity,
+        uint256 marketCap,
+        uint256 tradingVolume,
+        uint256 priceChange24h,
+        uint256 networkActivity
+    ) external onlyOwner {
+        marketData[token] = MarketData({
+            totalLiquidity: totalLiquidity,
+            marketCap: marketCap,
+            tradingVolume: tradingVolume,
+            priceChange24h: priceChange24h,
+            networkActivity: networkActivity,
+            timestamp: block.timestamp
+        });
+        
+        emit MarketDataUpdated(
+            token,
+            totalLiquidity,
+            marketCap,
+            tradingVolume,
+            block.timestamp
+        );
+    }
+    
+    function calculateDynamicRewardRate(
+        address token,
+        uint256 poolLiquidity,
+        uint256 poolVolume,
+        uint256 poolAPR
+    ) external view returns (uint256) {
+        DynamicRewardConfig storage config = poolRewardConfigs[token];
+        MarketData storage market = marketData[token];
+        
+        if (config.baseRewardRate == 0) {
+            return 1000; // 10% по умолчанию
+        }
+        
+        // Базовая формула динамического расчета наград
+        uint256 baseReward = config.baseRewardRate;
+        
+        // Множитель ликвидности
+        uint256 liquidityFactor = poolLiquidity > 0 ? 
+            (poolLiquidity * config.liquidityMultiplier) / 10000 : 0;
+            
+        // Множитель объема торгов
+        uint256 volumeFactor = poolVolume > 0 ? 
+            (poolVolume * config.volumeMultiplier) / 1000000 : 0;
+            
+        // Множитель рыночной капитализации
+        uint256 marketCapFactor = market.marketCap > 0 ? 
+            (market.marketCap * config.marketCapMultiplier) / 1000000000 : 0;
+            
+        // Множитель влияния цены
+        uint256 priceImpactFactor = (market.priceChange24h * config.priceImpactMultiplier) / 10000;
+            
+        // Множитель активности сети
+        uint256 networkFactor = (market.networkActivity * config.networkActivityMultiplier) / 10000;
+        
+        // Общий коэффициент
+        uint256 totalMultiplier = baseReward + 
+                                liquidityFactor + 
+                                volumeFactor + 
+                                marketCapFactor + 
+                                priceImpactFactor + 
+                                networkFactor;
+        
+        // Ограничение максимальной и минимальной награды
+        uint256 rewardRate = totalMultiplier;
+        if (rewardRate > config.maxRewardRate) {
+            rewardRate = config.maxRewardRate;
+        }
+        if (rewardRate < config.minRewardRate) {
+            rewardRate = config.minRewardRate;
+        }
+        
+        return rewardRate;
+    }
+    
+    function adjustPoolRewardRate(
+        address token,
+        uint256 poolLiquidity,
+        uint256 poolVolume,
+        uint256 poolAPR
+    ) external {
+        uint256 newRewardRate = calculateDynamicRewardRate(token, poolLiquidity, poolVolume, poolAPR);
+        
+        // Обновить информацию о пуле
+        PoolDynamicInfo storage dynamicInfo = poolDynamicInfo[token];
+        dynamicInfo.poolLiquidity = poolLiquidity;
+        dynamicInfo.poolVolume = poolVolume;
+        dynamicInfo.poolAPR = poolAPR;
+        dynamicInfo.lastUpdateTime = block.timestamp;
+        dynamicInfo.rewardAdjustment = newRewardRate;
+        
+        emit PoolRewardAdjusted(token, newRewardRate, 1); // 1 - автоматическое изменение
+    }
+    
+    function getPoolDynamicInfo(address token) external view returns (PoolDynamicInfo memory) {
+        return poolDynamicInfo[token];
+    }
+    
+    function getMarketDataInfo(address token) external view returns (MarketData memory) {
+        return marketData[token];
+    }
+    
+    function getDynamicRewardConfig(address token) external view returns (DynamicRewardConfig memory) {
+        return poolRewardConfigs[token];
+    }
+    
+    function getMarketStats() external view returns (
+        uint256 totalLiquidity,
+        uint256 totalMarketCap,
+        uint256 totalVolume,
+        uint256 avgPriceChange,
+        uint256 totalNetworkActivity
+    ) {
+        // Возвращает общую статистику рынка
+        return (0, 0, 0, 0, 0);
+    }
+}
 }
