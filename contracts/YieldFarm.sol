@@ -809,7 +809,7 @@ function getAutoReinvestConfig(address token) external view returns (AutoReinves
         
         return (0, 0, 0, 0, 0);
     }
-    // Добавить в функцию calculatePendingReward
+    
 function calculatePendingReward(address user, address token) public view returns (uint256) {
     // Защита от переполнения
     uint256 rewardPerToken = pool.rewardPerTokenStored;
