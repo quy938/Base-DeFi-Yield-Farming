@@ -81,9 +81,9 @@ contract BaseYieldFarm is Ownable, ReentrancyGuard {
         return accumulated - u.rewardDebt;
     }
 
-    // ---------------------------
+
     // Core logic
-    // ---------------------------
+
     function deposit(uint256 amount) external nonReentrant {
         require(amount > 0, "amount=0");
         _updatePool();
