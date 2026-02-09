@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /*
-  BaseYieldFarm.sol (educational)
+  BaseYieldFarm.sol
   - Single staking pool
   - Reward per block emission
   - SafeERC20 for token interactions
