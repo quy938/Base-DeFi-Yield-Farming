@@ -13,7 +13,7 @@ contract YieldFarm is Ownable, ReentrancyGuard {
     IERC20 public immutable rewardToken;
 
     uint256 public rewardPerBlock;
-    uint256 public accRewardPerShare; // 1e12
+    uint256 public accRewardPerShare; // 1e12 
     uint256 public lastRewardBlock;
 
     uint256 public totalStaked;
