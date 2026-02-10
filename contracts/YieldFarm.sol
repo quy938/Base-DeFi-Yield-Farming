@@ -18,7 +18,7 @@ contract YieldFarm is Ownable, ReentrancyGuard {
 
     uint256 public totalStaked;
 
-    // NEW: tracked reward budget
+    // NEW: tracked reward budget 
     uint256 public rewardBudget;
 
     struct UserInfo {
