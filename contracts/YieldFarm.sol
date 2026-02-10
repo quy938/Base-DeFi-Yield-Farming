@@ -32,7 +32,7 @@ contract YieldFarm is Ownable, ReentrancyGuard {
     event Claim(address indexed user, uint256 amount);
     event RewardPerBlockUpdated(uint256 oldValue, uint256 newValue);
 
-    // NEW
+ 
     event RewardsFunded(address indexed by, uint256 amount, uint256 newBudget);
 
     constructor(address _stakeToken, address _rewardToken, uint256 _rewardPerBlock) Ownable(msg.sender) {
