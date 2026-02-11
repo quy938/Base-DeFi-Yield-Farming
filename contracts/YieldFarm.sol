@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol"; 
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract YieldFarm is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -13,12 +13,12 @@ contract YieldFarm is Ownable, ReentrancyGuard {
     IERC20 public immutable rewardToken;
 
     uint256 public rewardPerBlock;
-    uint256 public accRewardPerShare; // 1e12 
+    uint256 public accRewardPerShare; // scaled by 1e12
     uint256 public lastRewardBlock;
 
     uint256 public totalStaked;
 
-    // NEW: tracked reward budget 
+    // Improvement: tracked reward budget funded by owner
     uint256 public rewardBudget;
 
     struct UserInfo {
@@ -31,8 +31,6 @@ contract YieldFarm is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
     event RewardPerBlockUpdated(uint256 oldValue, uint256 newValue);
-
- 
     event RewardsFunded(address indexed by, uint256 amount, uint256 newBudget);
 
     constructor(address _stakeToken, address _rewardToken, uint256 _rewardPerBlock) Ownable(msg.sender) {
