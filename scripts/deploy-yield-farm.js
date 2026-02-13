@@ -1,49 +1,58 @@
-
+const fs = require("fs");
+const path = require("path");
+require("dotenv").config();
 
 async function main() {
-  console.log("Deploying Yield Farm...");
-
   const [deployer] = await ethers.getSigners();
-  console.log("Deploying contracts with the account:", deployer.address);
-  console.log("Account balance:", (await deployer.getBalance()).toString());
+  console.log("Deployer:", deployer.address);
 
- 
-  const RewardToken = await ethers.getContractFactory("RewardToken");
-  const rewardToken = await RewardToken.deploy();
-  await rewardToken.deployed();
-  
-  const StakingToken = await ethers.getContractFactory("StakingToken");
-  const stakingToken = await StakingToken.deploy();
-  await stakingToken.deployed();
+  // Optional: if you already have tokens, set STAKE_TOKEN and REWARD_TOKEN in .env
+  let stakeToken = process.env.STAKE_TOKEN || "";
+  let rewardToken = process.env.REWARD_TOKEN || "";
 
+  if (!stakeToken) {
+    const Stake = await ethers.getContractFactory("RewardToken");
+    const s = await Stake.deploy("StakeToken", "STK");
+    await s.deployed();
+    stakeToken = s.address;
+    console.log("Deployed StakeToken (RewardToken):", stakeToken);
+  }
 
-  const YieldFarm = await ethers.getContractFactory("YieldFarmV2");
-  const yieldFarm = await YieldFarm.deploy(
-    rewardToken.address,
-    stakingToken.address,
-    ethers.utils.parseEther("100") 
-  );
+  if (!rewardToken) {
+    const Reward = await ethers.getContractFactory("RewardToken");
+    const r = await Reward.deploy("RewardToken", "RWD");
+    await r.deployed();
+    rewardToken = r.address;
+    console.log("Deployed RewardToken:", rewardToken);
+  }
 
-  await yieldFarm.deployed();
-  console.log("Yield Farm deployed to:", yieldFarm.address);
-  console.log("Reward Token deployed to:", rewardToken.address);
-  console.log("Staking Token deployed to:", stakingToken.address);
+  const rewardPerBlock = process.env.REWARD_PER_BLOCK
+    ? ethers.BigNumber.from(process.env.REWARD_PER_BLOCK)
+    : ethers.utils.parseUnits("1", 18);
 
+  const Farm = await ethers.getContractFactory("YieldFarm");
+  const farm = await Farm.deploy(stakeToken, rewardToken, rewardPerBlock);
+  await farm.deployed();
 
-  const fs = require("fs");
-  const data = {
-    yieldFarm: yieldFarm.address,
-    rewardToken: rewardToken.address,
-    stakingToken: stakingToken.address,
-    owner: deployer.address
+  console.log("YieldFarm:", farm.address);
+
+  const out = {
+    network: hre.network.name,
+    chainId: (await ethers.provider.getNetwork()).chainId,
+    deployer: deployer.address,
+    contracts: {
+      StakeToken: stakeToken,
+      RewardToken: rewardToken,
+      YieldFarm: farm.address
+    }
   };
-  
-  fs.writeFileSync("./config/deployment.json", JSON.stringify(data, null, 2));
+
+  const outPath = path.join(__dirname, "..", "deployments.json");
+  fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
+  console.log("Saved:", outPath);
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch(error => {
-    console.error(error);
-    process.exit(1);
-  });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
