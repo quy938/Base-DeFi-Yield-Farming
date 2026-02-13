@@ -25,7 +25,6 @@ async function main() {
   );
 
   await yieldFarm.deployed();
-
   console.log("Yield Farm deployed to:", yieldFarm.address);
   console.log("Reward Token deployed to:", rewardToken.address);
   console.log("Staking Token deployed to:", stakingToken.address);
