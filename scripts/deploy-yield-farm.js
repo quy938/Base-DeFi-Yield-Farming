@@ -1,5 +1,4 @@
 
-const { ethers } = require("hardhat");
 
 async function main() {
   console.log("Deploying Yield Farm...");
