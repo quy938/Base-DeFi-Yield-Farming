@@ -35,7 +35,7 @@ async function main() {
     for (let i = 0; i < 5; i++) await ethers.provider.send("evm_mine", []);
   }
 
-  // Claim
+  // Claim 
   await (await farm.connect(user).claim()).wait();
   console.log("Claimed");
 
