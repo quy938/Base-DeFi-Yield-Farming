@@ -8,7 +8,7 @@ async function main() {
 
   const farmAddr = deployments.contracts.YieldFarm;
   const stakeAddr = deployments.contracts.StakeToken;
-
+  const rewardAddr = deployments.contracts.RewardToken;
 
   const [owner, user] = await ethers.getSigners();
   const farm = await ethers.getContractAt("YieldFarm", farmAddr);
