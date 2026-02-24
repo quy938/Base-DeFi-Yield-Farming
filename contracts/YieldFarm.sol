@@ -160,4 +160,8 @@ contract YieldFarm is Ownable, ReentrancyGuard {
         rewardToken.safeTransfer(to, amount);
         emit Claim(to, amount);
     }
+    function rescueReward(address to, uint256 amount) external onlyOwner {
+    require(to != address(0), "zero");
+    rewardToken.safeTransfer(to, amount);
+}
 }
