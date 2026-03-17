@@ -1,167 +1,148 @@
-// SPDX-License-Identifier: MIT 
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract YieldFarm is Ownable, ReentrancyGuard {
+contract YieldFarm is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
-    IERC20 public immutable stakeToken;
-    IERC20 public immutable rewardToken;
+    IERC20 public stakeToken;
+    IERC20 public rewardToken;
 
     uint256 public rewardPerBlock;
-    uint256 public accRewardPerShare; // 1e12
     uint256 public lastRewardBlock;
+    uint256 public accRewardPerShare;
 
     uint256 public totalStaked;
-    uint256 public rewardBudget;
 
-    struct UserInfo {
+    struct User {
         uint256 amount;
         uint256 rewardDebt;
     }
-    mapping(address => UserInfo) public userInfo;
+
+    mapping(address => User) public users;
 
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount);
     event Claim(address indexed user, uint256 amount);
-    event RewardPerBlockUpdated(uint256 oldValue, uint256 newValue);
-    event RewardsFunded(address indexed by, uint256 amount, uint256 newBudget);
-
     event EmergencyWithdraw(address indexed user, uint256 amount);
+    event Funded(uint256 amount);
 
-    constructor(address _stakeToken, address _rewardToken, uint256 _rewardPerBlock) Ownable(msg.sender) {
-        require(_stakeToken != address(0) && _rewardToken != address(0), "zero addr");
-        stakeToken = IERC20(_stakeToken);
-        rewardToken = IERC20(_rewardToken);
+    constructor(address _stake, address _reward, uint256 _rewardPerBlock) {
+        stakeToken = IERC20(_stake);
+        rewardToken = IERC20(_reward);
         rewardPerBlock = _rewardPerBlock;
         lastRewardBlock = block.number;
     }
 
-    function fundRewards(uint256 amount) external onlyOwner {
-        require(amount > 0, "amount=0");
-        rewardToken.safeTransferFrom(msg.sender, address(this), amount);
-        rewardBudget += amount;
-        emit RewardsFunded(msg.sender, amount, rewardBudget);
-    }
-
-    function setRewardPerBlock(uint256 _newRewardPerBlock) external onlyOwner {
-        _updatePool();
-        emit RewardPerBlockUpdated(rewardPerBlock, _newRewardPerBlock);
-        rewardPerBlock = _newRewardPerBlock;
-    }
-
-    function pendingReward(address _user) external view returns (uint256) {
-        UserInfo memory u = userInfo[_user];
-        uint256 _acc = accRewardPerShare;
-
-        if (block.number > lastRewardBlock && totalStaked > 0 && rewardBudget > 0) {
-            uint256 blocks = block.number - lastRewardBlock;
-            uint256 reward = blocks * rewardPerBlock;
-            if (reward > rewardBudget) reward = rewardBudget;
-            _acc = _acc + (reward * 1e12) / totalStaked;
-        }
-
-        uint256 accumulated = (u.amount * _acc) / 1e12;
-        if (accumulated < u.rewardDebt) return 0;
-        return accumulated - u.rewardDebt;
-    }
-
-    function deposit(uint256 amount) external nonReentrant {
-        require(amount > 0, "amount=0");
-        _updatePool();
-
-        UserInfo storage u = userInfo[msg.sender];
-        uint256 pending = _pendingInternal(u);
-        if (pending > 0) _pay(msg.sender, pending);
-
-        stakeToken.safeTransferFrom(msg.sender, address(this), amount);
-        u.amount += amount;
-        totalStaked += amount;
-        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
-
-        emit Deposit(msg.sender, amount);
-    }
-
-    function withdraw(uint256 amount) external nonReentrant {
-        _updatePool();
-
-        UserInfo storage u = userInfo[msg.sender];
-        require(u.amount >= amount, "insufficient");
-
-        uint256 pending = _pendingInternal(u);
-        if (pending > 0) _pay(msg.sender, pending);
-
-        if (amount > 0) {
-            u.amount -= amount;
-            totalStaked -= amount;
-            stakeToken.safeTransfer(msg.sender, amount);
-            emit Withdraw(msg.sender, amount);
-        }
-
-        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
-    }
-
-    function claim() external nonReentrant {
-        _updatePool();
-        UserInfo storage u = userInfo[msg.sender];
-
-        uint256 pending = _pendingInternal(u);
-        require(pending > 0, "nothing");
-
-        _pay(msg.sender, pending);
-        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
-    }
-
-    // Improvement
-    function emergencyWithdraw() external nonReentrant {
-        UserInfo storage u = userInfo[msg.sender];
-        uint256 amount = u.amount;
-        require(amount > 0, "nothing staked");
-
-        u.amount = 0;
-        u.rewardDebt = 0;
-
-        totalStaked -= amount;
-        stakeToken.safeTransfer(msg.sender, amount);
-
-        emit EmergencyWithdraw(msg.sender, amount);
-    }
-
     function _updatePool() internal {
         if (block.number <= lastRewardBlock) return;
-
-        if (totalStaked == 0 || rewardBudget == 0) {
+        if (totalStaked == 0) {
             lastRewardBlock = block.number;
             return;
         }
 
         uint256 blocks = block.number - lastRewardBlock;
         uint256 reward = blocks * rewardPerBlock;
-        if (reward > rewardBudget) reward = rewardBudget;
 
-        accRewardPerShare = accRewardPerShare + (reward * 1e12) / totalStaked;
+        accRewardPerShare += (reward * 1e12) / totalStaked;
         lastRewardBlock = block.number;
     }
 
-    function _pendingInternal(UserInfo storage u) internal view returns (uint256) {
-        uint256 accumulated = (u.amount * accRewardPerShare) / 1e12;
-        if (accumulated < u.rewardDebt) return 0;
-        return accumulated - u.rewardDebt;
+    function deposit(uint256 amount) external whenNotPaused nonReentrant {
+        User storage u = users[msg.sender];
+        _updatePool();
+
+        if (u.amount > 0) {
+            uint256 pending = (u.amount * accRewardPerShare) / 1e12 - u.rewardDebt;
+            if (pending > 0) {
+                rewardToken.safeTransfer(msg.sender, pending);
+                emit Claim(msg.sender, pending);
+            }
+        }
+
+        stakeToken.safeTransferFrom(msg.sender, address(this), amount);
+
+        u.amount += amount;
+        totalStaked += amount;
+
+        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
+
+        emit Deposit(msg.sender, amount);
     }
 
-    function _pay(address to, uint256 amount) internal {
-        if (amount > rewardBudget) amount = rewardBudget;
-        require(amount > 0, "budget=0");
-        rewardBudget -= amount;
-        rewardToken.safeTransfer(to, amount);
-        emit Claim(to, amount);
+    function withdraw(uint256 amount) external whenNotPaused nonReentrant {
+        User storage u = users[msg.sender];
+        require(u.amount >= amount, "too much");
+
+        _updatePool();
+
+        uint256 pending = (u.amount * accRewardPerShare) / 1e12 - u.rewardDebt;
+
+        if (pending > 0) {
+            rewardToken.safeTransfer(msg.sender, pending);
+            emit Claim(msg.sender, pending);
+        }
+
+        u.amount -= amount;
+        totalStaked -= amount;
+
+        stakeToken.safeTransfer(msg.sender, amount);
+
+        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
+
+        emit Withdraw(msg.sender, amount);
     }
-    function rescueReward(address to, uint256 amount) external onlyOwner {
-    require(to != address(0), "zero");
-    rewardToken.safeTransfer(to, amount);
+
+    function claim() external whenNotPaused nonReentrant {
+        User storage u = users[msg.sender];
+        _updatePool();
+
+        uint256 pending = (u.amount * accRewardPerShare) / 1e12 - u.rewardDebt;
+        require(pending > 0, "no rewards");
+
+        rewardToken.safeTransfer(msg.sender, pending);
+
+        u.rewardDebt = (u.amount * accRewardPerShare) / 1e12;
+
+        emit Claim(msg.sender, pending);
+    }
+
+    function fundRewards(uint256 amount) external {
+        rewardToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Funded(amount);
+    }
+
+    function emergencyWithdraw() external nonReentrant {
+        User storage u = users[msg.sender];
+
+        uint256 amount = u.amount;
+        require(amount > 0, "zero");
+
+        u.amount = 0;
+        u.rewardDebt = 0;
+
+        totalStaked -= amount;
+
+        stakeToken.safeTransfer(msg.sender, amount);
+
+        emit EmergencyWithdraw(msg.sender, amount);
+    }
+
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function setRewardPerBlock(uint256 newRate) external onlyOwner {
+        _updatePool();
+        rewardPerBlock = newRate;
     }
 }
